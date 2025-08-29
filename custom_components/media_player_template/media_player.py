@@ -78,6 +78,8 @@ CONF_STOP_ACTION = "stop"
 CONF_TITLE_TEMPLATE = "title_template"
 CONF_VOLUME_DOWN_ACTION = "volume_down"
 CONF_VOLUME_UP_ACTION = "volume_up"
+CONF_REPEAT_SET_ACTION = "repeat_set"
+CONF_SHUFFLE_SET_ACTION = "shuffle_set"
 
 
 MEDIA_PLAYER_SCHEMA = vol.Schema(
@@ -121,6 +123,8 @@ MEDIA_PLAYER_SCHEMA = vol.Schema(
         vol.Required(CONF_VALUE_TEMPLATE): cv.template,
         vol.Optional(CONF_VOLUME_DOWN_ACTION): cv.SCRIPT_SCHEMA,
         vol.Optional(CONF_VOLUME_UP_ACTION): cv.SCRIPT_SCHEMA,
+        vol.Optional(CONF_REPEAT_SET_ACTION): cv.SCRIPT_SCHEMA,
+        vol.Optional(CONF_SHUFFLE_SET_ACTION): cv.SCRIPT_SCHEMA,
     }
 ).extend(TEMPLATE_ENTITY_AVAILABILITY_SCHEMA_LEGACY.schema)
 
@@ -182,6 +186,9 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
             (CONF_SET_VOLUME_ACTION, MediaPlayerEntityFeature.VOLUME_SET),
             (CONF_PLAY_MEDIA_ACTION, MediaPlayerEntityFeature.PLAY_MEDIA),
             (CONF_SEEK_ACTION, MediaPlayerEntityFeature.SEEK),
+            (CONF_REPEAT_SET_ACTION, MediaPlayerEntityFeature.REPEAT_SET)(
+                CONF_SHUFFLE_SET_ACTION, MediaPlayerEntityFeature.SHUFFLE_SET
+            ),
         ):
             if (action_config := config.get(action_id)) is not None:
                 self.add_script(action_id, action_config, self._attr_name, DOMAIN)
@@ -681,6 +688,24 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
             await self.async_run_script(
                 script,
                 run_variables={"position": position},
+                context=self._context,
+            )
+
+    async def async_media_set_shuffle(self, shuffle):
+        """Send set shuffle mode command."""
+        if script := self._action_scripts.get(CONF_SHUFFLE_SET_ACTION):
+            await self.async_run_script(
+                script,
+                run_variables={"shuffle": shuffle},
+                context=self._context,
+            )
+
+    async def async_media_set_repeat(self, repeat):
+        """Send set repeat mode command."""
+        if script := self._action_scripts.get(CONF_SHUFFLE_SET_ACTION):
+            await self.async_run_script(
+                script,
+                run_variables={"repeat": repeat},
                 context=self._context,
             )
 
