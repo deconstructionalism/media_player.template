@@ -15,6 +15,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntityFeature,
     MediaPlayerState,
     MediaType,
+    RepeatMode
 )
 from homeassistant.components.template import DOMAIN
 from homeassistant.components.template.helpers import async_setup_template_platform
@@ -78,9 +79,10 @@ CONF_STOP_ACTION = "stop"
 CONF_TITLE_TEMPLATE = "title_template"
 CONF_VOLUME_DOWN_ACTION = "volume_down"
 CONF_VOLUME_UP_ACTION = "volume_up"
-CONF_REPEAT_SET_ACTION = "repeat_set"
-CONF_SHUFFLE_SET_ACTION = "shuffle_set"
-
+CONF_REPEAT_SET_ACTION = "set_repeat"
+CONF_SHUFFLE_SET_ACTION = "set_shuffle"
+CONF_CURRENT_REPEAT_TEMPLATE = "current_repeat_template"
+CONF_CURRENT_SHUFFLE_TEMPLATE = "current_shuffle_template"
 
 MEDIA_PLAYER_SCHEMA = vol.Schema(
     {
@@ -123,6 +125,8 @@ MEDIA_PLAYER_SCHEMA = vol.Schema(
         vol.Required(CONF_VALUE_TEMPLATE): cv.template,
         vol.Optional(CONF_VOLUME_DOWN_ACTION): cv.SCRIPT_SCHEMA,
         vol.Optional(CONF_VOLUME_UP_ACTION): cv.SCRIPT_SCHEMA,
+        vol.Optional(CONF_CURRENT_REPEAT_TEMPLATE): cv.template,
+        vol.Optional(CONF_CURRENT_SHUFFLE_TEMPLATE): cv.template,
         vol.Optional(CONF_REPEAT_SET_ACTION): cv.SCRIPT_SCHEMA,
         vol.Optional(CONF_SHUFFLE_SET_ACTION): cv.SCRIPT_SCHEMA,
     }
@@ -186,9 +190,8 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
             (CONF_SET_VOLUME_ACTION, MediaPlayerEntityFeature.VOLUME_SET),
             (CONF_PLAY_MEDIA_ACTION, MediaPlayerEntityFeature.PLAY_MEDIA),
             (CONF_SEEK_ACTION, MediaPlayerEntityFeature.SEEK),
-            (CONF_REPEAT_SET_ACTION, MediaPlayerEntityFeature.REPEAT_SET)(
-                CONF_SHUFFLE_SET_ACTION, MediaPlayerEntityFeature.SHUFFLE_SET
-            ),
+            (CONF_REPEAT_SET_ACTION, MediaPlayerEntityFeature.REPEAT_SET),
+            (CONF_SHUFFLE_SET_ACTION, MediaPlayerEntityFeature.SHUFFLE_SET),
         ):
             if (action_config := config.get(action_id)) is not None:
                 self.add_script(action_id, action_config, self._attr_name, DOMAIN)
@@ -220,6 +223,8 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
         self._media_content_type_template = config.get(CONF_MEDIA_CONTENT_TYPE_TEMPLATE)
         self._current_position_template = config.get(CONF_CURRENT_POSITION_TEMPLATE)
         self._media_duration_template = config.get(CONF_MEDIA_DURATION_TEMPLATE)
+        self._current_repeat_template = config.get(CONF_CURRENT_REPEAT_TEMPLATE)
+        self._current_shuffle_template = config.get(CONF_CURRENT_SHUFFLE_TEMPLATE)
 
         self._attr_media_image_remotely_accessible = config.get(
             CONF_MEDIA_IMAGE_URL_REMOTELY_ACCESSIBLE, False
@@ -360,6 +365,22 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
                 None,
                 self._update_sound_mode,
                 none_on_template_error=True,
+            )
+        if self._current_repeat_template is not None:
+            self.add_template_attribute(
+                "_attr_repeat",
+                self._current_repeat_template,
+                None,
+                self._update_repeat,
+                none_on_template_error=True
+            )
+        if self._current_shuffle_template is not None:
+            self.add_template_attribute(
+                "_attr_shuffle",
+                self._current_shuffle_template,
+                None,
+                self._update_shuffle,
+                none_on_template_error=True
             )
         super()._async_setup_templates()
 
@@ -604,6 +625,40 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
 
         self._attr_sound_mode = result
 
+    @callback
+    def _update_repeat(self, result):
+        if isinstance(result, TemplateError) or result is None:
+            self._attr_repeat = None
+            return
+
+        result = vol.Coerce(str)(result).lower()
+        try:
+            self._attr_repeat = RepeatMode(result)
+        except ValueError:
+            _LOGGER.error(
+                "Template entity %s received an invalid repeat setting type %s, expected: %s",
+                self.entity_id,
+                result,
+                ", ".join(RepeatMode),
+            )
+            self._attr_repeat = None
+
+    @callback
+    def _update_shuffle(self, result):
+        if isinstance(result, TemplateError) or result is None:
+            self._attr_shuffle = None
+            return
+
+        try:
+            self._attr_shuffle = cv.boolean(result)
+        except vol.Invalid:
+            _LOGGER.error(
+                "Received invalid shuffle setting: %s for entity %s, expected: true or false",
+                result,
+                self.entity_id,
+            )
+            self._attr_shuffle = None
+
     async def async_turn_on(self):
         """Fire the on action."""
         if script := self._action_scripts.get(CONF_ON_ACTION):
@@ -691,24 +746,6 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
                 context=self._context,
             )
 
-    async def async_media_set_shuffle(self, shuffle):
-        """Send set shuffle mode command."""
-        if script := self._action_scripts.get(CONF_SHUFFLE_SET_ACTION):
-            await self.async_run_script(
-                script,
-                run_variables={"shuffle": shuffle},
-                context=self._context,
-            )
-
-    async def async_media_set_repeat(self, repeat):
-        """Send set repeat mode command."""
-        if script := self._action_scripts.get(CONF_SHUFFLE_SET_ACTION):
-            await self.async_run_script(
-                script,
-                run_variables={"repeat": repeat},
-                context=self._context,
-            )
-
     async def async_select_source(self, source):
         """Set the input source."""
         if script := self._action_scripts.get(f"input_{source}"):
@@ -724,3 +761,22 @@ class MediaPlayerTemplate(TemplateEntity, MediaPlayerEntity):
                 self._attr_sound_mode = sound_mode
                 self.async_write_ha_state()
             await self.async_run_script(script, context=self._context)
+
+
+    async def async_set_shuffle(self, shuffle):
+        """Send shuffle set command."""
+        if script := self._action_scripts.get(CONF_SHUFFLE_SET_ACTION):
+            await self.async_run_script(
+                script,
+                run_variables={"shuffle": shuffle},
+                context=self._context,
+            )
+
+    async def async_set_repeat(self, repeat):
+        """Send repeat set command."""
+        if script := self._action_scripts.get(CONF_SHUFFLE_SET_ACTION):
+            await self.async_run_script(
+                script,
+                run_variables={"repeat": repeat},
+                context=self._context,
+            )
